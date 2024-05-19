@@ -16,11 +16,13 @@ struct HttpResponse {
     char protocol[20];
 };
 
-char *resp_200 = "HTTP/1.1 200 OK\r\n\r\n";
+char *resp_200 = "HTTP/1.1 200 OK\r\n";
 char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
 void initHttpResponse(struct HttpResponse *response, char *req_buffer);
 void processResponse(struct HttpResponse *response, int client);
+void serverEcho(struct HttpResponse *response, int client);
+char *writeResponse(char *type, char *response_body);
 
 int main() {
 	// Disable output buffering
@@ -109,10 +111,73 @@ void processResponse(struct HttpResponse *response, int client){
 
 	if (get_method == 0){
 		if (path == 0){
-			send(client, resp_200, strlen(resp_200),0);
+			char buffer_resp_200[BUFFER_SIZE];
+			sprintf(buffer_resp_200, "%s\r\n", resp_200);
+			send(client, buffer_resp_200, strlen(buffer_resp_200),0);
+		}
+		else{
+			serverEcho(response, client);
+		}
+	}
+}
+
+void serverEcho(struct HttpResponse *response, int client){
+	char *token = NULL;
+	char *rest = response->path;
+	char *echo_path[2] = {NULL};
+	int i = 0;
+	while ((token = strtok_r(rest, "/", &rest))){
+		echo_path[i++] = token;
+		if (i >= 2)
+			break;
+	}
+
+	int echo = strcmp(echo_path[0], "echo");
+
+	if (echo == 0){
+		char *echo_response = writeResponse("text/plain", echo_path[1]);
+
+		if (echo_response != NULL){
+			send(client, echo_response, strlen(echo_response),0);
+			free(echo_response);
 		}
 		else{
 			send(client, resp_404, strlen(resp_404),0);
 		}
 	}
+	else{
+		send(client, resp_404, strlen(resp_404),0);
+	}
+
+}
+
+char *writeResponse(char *type, char *response_body){
+
+	if (response_body == NULL){
+		return NULL;
+	}
+
+	char *buffer = (char *)malloc(BUFFER_SIZE);
+
+	if( buffer == NULL ){
+		printf("SERVER ERROR");
+		return NULL;
+	}
+
+	if (strcmp(type, "text/plain") == 0){
+		size_t body_len = strlen(response_body);
+		size_t len = 0;
+
+		if (body_len > 0){
+			len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s",resp_200, body_len, response_body);
+		}
+		
+		if (len < 0 || len >= BUFFER_SIZE) {
+			printf("SERVER ERROR");
+			free(buffer);
+			return NULL;
+		}
+	}
+
+	return buffer;
 }
