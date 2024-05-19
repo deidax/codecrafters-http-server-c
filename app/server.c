@@ -7,6 +7,21 @@
 #include <errno.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE 4096
+
+
+struct HttpResponse {
+    char method[10];
+    char path[100];
+    char protocol[20];
+};
+
+char *resp_200 = "HTTP/1.1 200 OK\r\n\r\n";
+char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
+
+void initHttpResponse(struct HttpResponse *response, char *req_buffer);
+void processResponse(struct HttpResponse *response, int client);
+
 int main() {
 	// Disable output buffering
 	setbuf(stdout, NULL);
@@ -53,11 +68,51 @@ int main() {
 	client_addr_len = sizeof(client_addr);
 	
 	int client = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	char *resp_stg1 = "HTTP/1.1 200 OK\r\n\r\n";
 	printf("Client connected\n");
-	send(client, resp_stg1, strlen(resp_stg1),0);
+
+	struct HttpResponse response;
+	char req_buffer[BUFFER_SIZE] = {0};
+	int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
 	
+	initHttpResponse(&response, req_buffer);
+	processResponse(&response, client);
+
 	close(server_fd);
 
 	return 0;
+}
+
+
+void initHttpResponse(struct HttpResponse *response, char *req_buffer) {
+	char *token = NULL;
+	char *rest = req_buffer;
+	char *req_body[3] = {NULL};
+	int i = 0;
+	while ((token = strtok_r(rest, " ", &rest))){
+		req_body[i++] = token;
+		if (i >= 3)
+			break;
+	}
+
+    strncpy(response->method, req_body[0], sizeof(response->method)-1);
+    strncpy(response->path, req_body[1], sizeof(response->path)-1);
+    strncpy(response->protocol, req_body[2], sizeof(response->protocol)-1);
+    response->method[sizeof(response->method)-1] = '\0';
+    response->path[sizeof(response->path)-1] = '\0';
+    response->protocol[sizeof(response->protocol)-1] = '\0';
+}
+
+void processResponse(struct HttpResponse *response, int client){
+	
+	int get_method = strcmp(response->method, "GET");
+	int path = strcmp(response->path, "/");
+
+	if (get_method == 0){
+		if (path == 0){
+			send(client, resp_200, strlen(resp_200),0);
+		}
+		else{
+			send(client, resp_404, strlen(resp_404),0);
+		}
+	}
 }
