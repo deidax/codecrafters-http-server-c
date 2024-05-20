@@ -10,18 +10,21 @@
 #define BUFFER_SIZE 4096
 
 
-struct HttpResponse {
+struct HttpRequest {
     char method[10];
     char path[100];
     char protocol[20];
+	char user_agent[BUFFER_SIZE];
 };
 
 char *resp_200 = "HTTP/1.1 200 OK\r\n";
 char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
-void initHttpResponse(struct HttpResponse *response, char *req_buffer);
-void processResponse(struct HttpResponse *response, int client);
-void serverEcho(struct HttpResponse *response, int client);
+void initHttpRequest(struct HttpRequest *request, char *req_buffer);
+void initUserAgent(struct HttpRequest *request, char *req_buffer);
+void processResponse(struct HttpRequest *request, int client);
+int serverEcho(struct HttpRequest *request, int client);
+int requestUserAgent(struct HttpRequest *request, int client);
 char *writeResponse(char *type, char *response_body);
 
 int main() {
@@ -72,12 +75,13 @@ int main() {
 	int client = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 	printf("Client connected\n");
 
-	struct HttpResponse response;
+	struct HttpRequest request;
 	char req_buffer[BUFFER_SIZE] = {0};
 	int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
-	
-	initHttpResponse(&response, req_buffer);
-	processResponse(&response, client);
+
+	printf("---> %s\n", req_buffer);
+	initHttpRequest(&request, req_buffer);
+	processResponse(&request, client);
 
 	close(server_fd);
 
@@ -85,45 +89,97 @@ int main() {
 }
 
 
-void initHttpResponse(struct HttpResponse *response, char *req_buffer) {
+void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
+
+
 	char *token = NULL;
 	char *rest = req_buffer;
 	char *req_body[3] = {NULL};
 	int i = 0;
+
+	initUserAgent(request, req_buffer);
+
 	while ((token = strtok_r(rest, " ", &rest))){
 		req_body[i++] = token;
 		if (i >= 3)
 			break;
 	}
 
-    strncpy(response->method, req_body[0], sizeof(response->method)-1);
-    strncpy(response->path, req_body[1], sizeof(response->path)-1);
-    strncpy(response->protocol, req_body[2], sizeof(response->protocol)-1);
-    response->method[sizeof(response->method)-1] = '\0';
-    response->path[sizeof(response->path)-1] = '\0';
-    response->protocol[sizeof(response->protocol)-1] = '\0';
+
+    strncpy(request->method, req_body[0], sizeof(request->method)-1);
+    strncpy(request->path, req_body[1], sizeof(request->path)-1);
+    strncpy(request->protocol, req_body[2], sizeof(request->protocol)-1);
+    request->method[sizeof(request->method)-1] = '\0';
+    request->path[sizeof(request->path)-1] = '\0';
+    request->protocol[sizeof(request->protocol)-1] = '\0';
 }
 
-void processResponse(struct HttpResponse *response, int client){
+void initUserAgent(struct HttpRequest *request, char *req_buffer) {
 	
-	int get_method = strcmp(response->method, "GET");
-	int path = strcmp(response->path, "/");
+	char *token = NULL;
+	char *rest = req_buffer;
+	char *req_body[4] = {NULL};
+	char *user_agent[2] = {NULL};
+	
+	int i = 0;
+	while ((token = strtok_r(rest, "\r\n", &rest))){
+		req_body[i++] = token;
+		if (i >= 4)
+			break;
+	}
 
-	if (get_method == 0){
+	
+	token = NULL;
+	rest = req_body[3];
+	i = 0;
+
+	while ((token = strtok_r(rest, ": ", &rest))){
+		user_agent[i++] = token;
+		if (i >= 2)
+			break;
+	}
+
+	int user_agent_header = strcmp(user_agent[0], "User-Agent");
+
+	if ( user_agent_header != 0){
+		printf("EMPTY AGNET");
+		strncpy(request->user_agent, "no-user-agent", sizeof(request->user_agent)-1);
+	}
+	else{
+		strncpy(request->user_agent, user_agent[1], sizeof(request->user_agent)-1);
+	}
+
+	request->user_agent[sizeof(request->user_agent)-1] = '\0';
+}
+
+void processResponse(struct HttpRequest *request, int client){
+	
+	int get_method = strcmp(request->method, "GET");
+	int path = strcmp(request->path, "/");
+
+	if (get_method == 0)
+	{
+
 		if (path == 0){
 			char buffer_resp_200[BUFFER_SIZE];
 			sprintf(buffer_resp_200, "%s\r\n", resp_200);
 			send(client, buffer_resp_200, strlen(buffer_resp_200),0);
+			return;
+		}
+	
+		else if ( serverEcho(request, client) != 1 ){
+			requestUserAgent(request, client);
 		}
 		else{
-			serverEcho(response, client);
+			send(client, resp_404, strlen(resp_404),0);
 		}
+	
 	}
 }
 
-void serverEcho(struct HttpResponse *response, int client){
+int serverEcho(struct HttpRequest *request, int client){
 	char *token = NULL;
-	char *rest = response->path;
+	char *rest = request->path;
 	char *echo_path[2] = {NULL};
 	int i = 0;
 	while ((token = strtok_r(rest, "/", &rest))){
@@ -141,14 +197,42 @@ void serverEcho(struct HttpResponse *response, int client){
 			send(client, echo_response, strlen(echo_response),0);
 			free(echo_response);
 		}
+
+		return 1; //server echo success
+	}
+	
+
+	return 0; //server echo 404
+
+}
+
+int requestUserAgent(struct HttpRequest *request, int client){
+	char *token = NULL;
+	char *rest = request->path;
+	char *user_agent_path[1] = {NULL};
+	int i = 0;
+	while ((token = strtok_r(rest, "/", &rest))){
+		user_agent_path[i++] = token;
+		if (i >= 1)
+			break;
+	}
+
+	int user_agent = strcmp(user_agent_path[0], "user-agent");
+	if (user_agent == 0){
+		char *user_agent_response = writeResponse("text/plain", request->user_agent);
+
+		if (user_agent_response != NULL){
+			send(client, user_agent_response, strlen(user_agent_response),0);
+			free(user_agent_response);
+		}
 		else{
 			send(client, resp_404, strlen(resp_404),0);
 		}
-	}
-	else{
-		send(client, resp_404, strlen(resp_404),0);
+
+		return 1;
 	}
 
+	return 0;
 }
 
 char *writeResponse(char *type, char *response_body){
