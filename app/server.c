@@ -38,6 +38,7 @@ int main() {
 	//
 	int server_fd, client_addr_len;
 	struct sockaddr_in client_addr;
+	pid_t childpid;
 	
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd == -1) {
@@ -70,18 +71,28 @@ int main() {
 	}
 	
 	printf("Waiting for a client to connect...\n");
-	client_addr_len = sizeof(client_addr);
-	
-	int client = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-	printf("Client connected\n");
 
-	struct HttpRequest request;
-	char req_buffer[BUFFER_SIZE] = {0};
-	int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
+	int client_count = 0;
+	while (1)
+	{
+		client_addr_len = sizeof(client_addr);
+		
+		int client = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 
-	printf("%s\n", req_buffer);
-	initHttpRequest(&request, req_buffer);
-	processResponse(&request, client);
+		if (client < 0){
+			exit(1);
+		}
+		printf("Client connected: %d\n", ++client_count);
+		if ((childpid = fork()) == 0) {
+			struct HttpRequest request;
+			char req_buffer[BUFFER_SIZE] = {0};
+			int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
+
+			printf("%s\n", req_buffer);
+			initHttpRequest(&request, req_buffer);
+			processResponse(&request, client);
+		}
+	}
 
 	close(server_fd);
 
