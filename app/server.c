@@ -79,6 +79,7 @@ int main() {
 	char req_buffer[BUFFER_SIZE] = {0};
 	int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
 
+	printf("%s\n", req_buffer);
 	initHttpRequest(&request, req_buffer);
 	processResponse(&request, client);
 
@@ -126,25 +127,31 @@ void initUserAgent(struct HttpRequest *request, char *req_buffer) {
 		if (i >= 4)
 			break;
 	}
-
 	
-	token = NULL;
-	rest = req_body[3];
-	i = 0;
-
-	while ((token = strtok_r(rest, ": ", &rest))){
-		user_agent[i++] = token;
-		if (i >= 2)
+	for (int j=1; j <= 3; j++){
+		token = NULL;
+		rest = req_body[j];
+		i = 0;
+		if (rest != NULL){
+			while ((token = strtok_r(rest, ": ", &rest))){
+				user_agent[i++] = token;
+				if ( i >= 2 )
+					break;
+			}
+		}
+		
+		if ( user_agent[0] != NULL && strcmp(user_agent[0], "User-Agent") == 0 ){
+			strncpy(request->user_agent, user_agent[1], sizeof(request->user_agent)-1);
 			break;
+		}
+
+		*user_agent = NULL;
 	}
 
-	int user_agent_header = strcmp(user_agent[0], "User-Agent");
 
-	if ( user_agent_header != 0){
+
+	if ( user_agent == NULL ){
 		strncpy(request->user_agent, "no-user-agent", sizeof(request->user_agent)-1);
-	}
-	else{
-		strncpy(request->user_agent, user_agent[1], sizeof(request->user_agent)-1);
 	}
 
 	request->user_agent[sizeof(request->user_agent)-1] = '\0';
