@@ -79,7 +79,6 @@ int main() {
 	char req_buffer[BUFFER_SIZE] = {0};
 	int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
 
-	printf("---> %s\n", req_buffer);
 	initHttpRequest(&request, req_buffer);
 	processResponse(&request, client);
 
@@ -142,7 +141,6 @@ void initUserAgent(struct HttpRequest *request, char *req_buffer) {
 	int user_agent_header = strcmp(user_agent[0], "User-Agent");
 
 	if ( user_agent_header != 0){
-		printf("EMPTY AGNET");
 		strncpy(request->user_agent, "no-user-agent", sizeof(request->user_agent)-1);
 	}
 	else{
