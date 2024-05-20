@@ -22,13 +22,15 @@ char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
 void initUserAgent(struct HttpRequest *request, char *req_buffer);
-void processResponse(struct HttpRequest *request, int client);
+void processResponse(struct HttpRequest *request, int client, char *directory);
 int serverEcho(struct HttpRequest *request, int client);
 int requestUserAgent(struct HttpRequest *request, int client);
-int requestFile(struct HttpRequest *request, int client);
+int requestFile(struct HttpRequest *request, int client, char *directory);
+char *readFile(char *filename);
 char *writeResponse(char *type, char *response_body);
+char *getDirectoryPath(int argc, char **argv);
 
-int main() {
+int main(int argc, char **argv) {
 	// Disable output buffering
 	setbuf(stdout, NULL);
 
@@ -90,8 +92,9 @@ int main() {
 			int bytes_received = recv(client, req_buffer, sizeof(req_buffer), 0);
 
 			printf("%s\n", req_buffer);
+			char *directory_path = getDirectoryPath(argc, argv);
 			initHttpRequest(&request, req_buffer);
-			processResponse(&request, client);
+			processResponse(&request, client, directory_path);
 		}
 	}
 
@@ -169,11 +172,11 @@ void initUserAgent(struct HttpRequest *request, char *req_buffer) {
 	request->user_agent[sizeof(request->user_agent)-1] = '\0';
 }
 
-void processResponse(struct HttpRequest *request, int client){
+void processResponse(struct HttpRequest *request, int client, char *directory){
 	
 	int get_method = strcmp(request->method, "GET");
 	int path = strcmp(request->path, "/");
-
+	
 	if (get_method == 0)
 	{
 
@@ -183,10 +186,9 @@ void processResponse(struct HttpRequest *request, int client){
 			send(client, buffer_resp_200, strlen(buffer_resp_200),0);
 			return;
 		}
-	
 		else if ( serverEcho(request, client) != 1 ){
 			if (requestUserAgent(request, client) != 1){
-				if (requestFile(request, client) != 1){
+				if (requestFile(request, client, directory) != 1){
 					send(client, resp_404, strlen(resp_404),0);
 				}
 			}
@@ -200,7 +202,7 @@ void processResponse(struct HttpRequest *request, int client){
 
 int serverEcho(struct HttpRequest *request, int client){
 	char *token = NULL;
-	char *rest = request->path;
+	char *rest = strdup(request->path);
 	char *echo_path[2] = {NULL};
 	int i = 0;
 	while ((token = strtok_r(rest, "/", &rest))){
@@ -218,7 +220,7 @@ int serverEcho(struct HttpRequest *request, int client){
 			send(client, echo_response, strlen(echo_response),0);
 			free(echo_response);
 		}
-
+		
 		return 1; //server echo success
 	}
 	
@@ -229,7 +231,7 @@ int serverEcho(struct HttpRequest *request, int client){
 
 int requestUserAgent(struct HttpRequest *request, int client){
 	char *token = NULL;
-	char *rest = request->path;
+	char *rest = strdup(request->path);
 	char *user_agent_path[1] = {NULL};
 	int i = 0;
 	while ((token = strtok_r(rest, "/", &rest))){
@@ -256,21 +258,27 @@ int requestUserAgent(struct HttpRequest *request, int client){
 	return 0;
 }
 
-int requestFile(struct HttpRequest *request, int client){
+int requestFile(struct HttpRequest *request, int client, char *directory){
 	char *token = NULL;
-	char *rest = request->path;
-	char *file_path[1] = {NULL};
+	char *rest = strdup(request->path);
+	char *file_path[2] = {NULL};
 	int i = 0;
+	
 	while ((token = strtok_r(rest, "/", &rest))){
 		file_path[i++] = token;
-		if (i >= 1)
+		if (i >= 2)
 			break;
 	}
 
-	int file = strcmp(file_path[0], "file");
-	if (file == 0){
-		char *file_response = writeResponse("application/octet-stream", request->user_agent);
+	int file = strcmp(file_path[0], "files");
+	if (file == 0 && i >= 2){
 
+		char *dir_file = (char *)malloc(BUFFER_SIZE);
+		snprintf(dir_file, BUFFER_SIZE, "%s/%s", directory, file_path[1]);
+		printf("directory %s\n", dir_file);
+
+		char *file_response = writeResponse("application/octet-stream", dir_file);
+		free(dir_file);
 		if (file_response != NULL){
 			send(client, file_response, strlen(file_response),0);
 			free(file_response);
@@ -314,8 +322,77 @@ char *writeResponse(char *type, char *response_body){
 	}
 
 	else if (strcmp(type, "application/octet-stream") == 0){
-		printf("READING FILE...");
+		printf("READING FILE %s...", response_body);
+		char *file_data = readFile(response_body);
+
+		if (file_data == NULL){
+			return NULL;
+		}
+
+		printf("FILE-CONTENT:\n%s\n", file_data);
+		size_t body_len = strlen(file_data);
+		size_t len = 0;
+
+		if (body_len > 0){
+			len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: application/octet-stream\r\nContent-Length: %zu\r\n\r\n%s",resp_200, body_len, file_data);
+		}
+		
+		if (len < 0 || len >= BUFFER_SIZE) {
+			printf("SERVER ERROR");
+			free(buffer);
+			return NULL;
+		}
+		free(file_data);
 	}
 
 	return buffer;
+}
+
+char *readFile(char *filename){
+	FILE *file = fopen(filename, "rb");
+	
+	if (file == NULL){
+		fprintf(stderr, "Error opening file %s or it does not exist", filename);
+		return NULL;
+	}
+
+	fseek(file, 0, SEEK_END);
+	long file_size = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	char *buffer = malloc(file_size+1);
+	if (buffer == NULL){
+		fprintf(stderr, "Error allocating memory for file %s", filename);
+		fclose(file);
+		return NULL;
+	}
+
+	size_t bytes_read = fread(buffer, 1, file_size, file);
+	if (bytes_read != file_size){
+		fprintf(stderr, "Error reading file %s, probably file too large to be processed", filename);
+		fclose(file);
+		free(buffer);
+		return NULL;
+	}
+
+	buffer[file_size] = '\0';
+
+	fclose(file);
+
+	return buffer;
+
+}
+
+char *getDirectoryPath(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--directory") == 0) {
+            if (i + 1 < argc) {
+                return argv[i + 1];
+            } else {
+                fprintf(stderr, "--directory requires a value\n");
+                return NULL;
+            }
+        }
+    }
+    return NULL;
 }
