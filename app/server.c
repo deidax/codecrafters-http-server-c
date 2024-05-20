@@ -173,7 +173,9 @@ void processResponse(struct HttpRequest *request, int client){
 		}
 	
 		else if ( serverEcho(request, client) != 1 ){
-			requestUserAgent(request, client);
+			if (requestUserAgent(request, client) != 1){
+				send(client, resp_404, strlen(resp_404),0);
+			}
 		}
 		else{
 			send(client, resp_404, strlen(resp_404),0);
