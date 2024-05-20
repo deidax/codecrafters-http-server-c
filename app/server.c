@@ -25,6 +25,7 @@ void initUserAgent(struct HttpRequest *request, char *req_buffer);
 void processResponse(struct HttpRequest *request, int client);
 int serverEcho(struct HttpRequest *request, int client);
 int requestUserAgent(struct HttpRequest *request, int client);
+int requestFile(struct HttpRequest *request, int client);
 char *writeResponse(char *type, char *response_body);
 
 int main() {
@@ -185,7 +186,9 @@ void processResponse(struct HttpRequest *request, int client){
 	
 		else if ( serverEcho(request, client) != 1 ){
 			if (requestUserAgent(request, client) != 1){
-				send(client, resp_404, strlen(resp_404),0);
+				if (requestFile(request, client) != 1){
+					send(client, resp_404, strlen(resp_404),0);
+				}
 			}
 		}
 		else{
@@ -253,6 +256,35 @@ int requestUserAgent(struct HttpRequest *request, int client){
 	return 0;
 }
 
+int requestFile(struct HttpRequest *request, int client){
+	char *token = NULL;
+	char *rest = request->path;
+	char *file_path[1] = {NULL};
+	int i = 0;
+	while ((token = strtok_r(rest, "/", &rest))){
+		file_path[i++] = token;
+		if (i >= 1)
+			break;
+	}
+
+	int file = strcmp(file_path[0], "file");
+	if (file == 0){
+		char *file_response = writeResponse("application/octet-stream", request->user_agent);
+
+		if (file_response != NULL){
+			send(client, file_response, strlen(file_response),0);
+			free(file_response);
+		}
+		else{
+			send(client, resp_404, strlen(resp_404),0);
+		}
+
+		return 1;
+	}
+
+	return 0;
+}
+
 char *writeResponse(char *type, char *response_body){
 
 	if (response_body == NULL){
@@ -279,6 +311,10 @@ char *writeResponse(char *type, char *response_body){
 			free(buffer);
 			return NULL;
 		}
+	}
+
+	else if (strcmp(type, "application/octet-stream") == 0){
+		printf("READING FILE...");
 	}
 
 	return buffer;
