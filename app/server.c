@@ -405,7 +405,7 @@ char *writeResponse(char *type, struct HttpResponse *response){
 		if (body_len > 0){
 			
 			if (response->content_encoding[0] != '\0'){
-				len = snprintf(buffer, BUFFER_SIZE,"Content-Encoding: %s\r\n%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->content_encoding, response->status, body_len, response->body);
+				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->content_encoding, response->status, body_len, response->body);
 			}
 			else{
 				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
