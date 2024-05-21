@@ -15,9 +15,11 @@ struct HttpRequest {
     char path[100];
     char protocol[20];
 	char user_agent[BUFFER_SIZE];
+	char body[BUFFER_SIZE];
 };
 
 char *resp_200 = "HTTP/1.1 200 OK\r\n";
+char *resp_201 = "HTTP/1.1 201 Accepted\r\n\r\n";
 char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
@@ -26,7 +28,9 @@ void processResponse(struct HttpRequest *request, int client, char *directory);
 int serverEcho(struct HttpRequest *request, int client);
 int requestUserAgent(struct HttpRequest *request, int client);
 int requestFile(struct HttpRequest *request, int client, char *directory);
+int postFile(struct HttpRequest *request, int client, char *directory);
 char *readFile(char *filename);
+void writeFile(char *filename, char *content);
 char *writeResponse(char *type, char *response_body);
 char *getDirectoryPath(int argc, char **argv);
 
@@ -108,11 +112,11 @@ void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
 
 
 	char *token = NULL;
-	char *rest = req_buffer;
+	char *rest = strdup(req_buffer);
 	char *req_body[3] = {NULL};
 	int i = 0;
 
-	initUserAgent(request, req_buffer);
+	initUserAgent(request, strdup(req_buffer));
 
 	while ((token = strtok_r(rest, " ", &rest))){
 		req_body[i++] = token;
@@ -127,6 +131,18 @@ void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
     request->method[sizeof(request->method)-1] = '\0';
     request->path[sizeof(request->path)-1] = '\0';
     request->protocol[sizeof(request->protocol)-1] = '\0';
+
+	char *body = strstr(strdup(req_buffer), "\r\n\r\n");
+	
+	if (body != NULL){
+		body += 4;
+		strncpy(request->body, body, sizeof(request->body)-1);
+		request->body[sizeof(request->body)-1] = '\0';
+	}
+	else{
+		request->body[0] = '\0';
+	}
+	
 }
 
 void initUserAgent(struct HttpRequest *request, char *req_buffer) {
@@ -174,10 +190,9 @@ void initUserAgent(struct HttpRequest *request, char *req_buffer) {
 
 void processResponse(struct HttpRequest *request, int client, char *directory){
 	
-	int get_method = strcmp(request->method, "GET");
 	int path = strcmp(request->path, "/");
 	
-	if (get_method == 0)
+	if (strcmp(request->method, "GET") == 0)
 	{
 
 		if (path == 0){
@@ -197,6 +212,14 @@ void processResponse(struct HttpRequest *request, int client, char *directory){
 			send(client, resp_404, strlen(resp_404),0);
 		}
 	
+	}
+	else if (strcmp(request->method, "POST") == 0)
+	{
+		printf("POST METHOD....");
+		if (postFile(request, client, directory) != 1){
+			printf("NO DATA CONTENT");
+			send(client, resp_404, strlen(resp_404),0);
+		}
 	}
 }
 
@@ -293,6 +316,38 @@ int requestFile(struct HttpRequest *request, int client, char *directory){
 	return 0;
 }
 
+int postFile(struct HttpRequest *request, int client, char *directory){
+	char *token = NULL;
+	char *rest = strdup(request->path);
+	char *file_path[2] = {NULL};
+	int i = 0;
+	
+	while ((token = strtok_r(rest, "/", &rest))){
+		file_path[i++] = token;
+		if (i >= 2)
+			break;
+	}
+
+	int file = strcmp(file_path[0], "files");
+	if (file == 0 && i >= 2){
+
+		char *dir_file = (char *)malloc(BUFFER_SIZE);
+		snprintf(dir_file, BUFFER_SIZE, "%s/%s", directory, file_path[1]);
+		printf(" POST FILE IN DIR %s\n", dir_file);
+
+		if (request->body[0] != '\0'){
+			printf("WRITING.... TO %s\n", dir_file);
+			writeFile(dir_file, request->body);
+			send(client, resp_201, strlen(resp_201),0);
+
+			return 1;
+		}
+		
+	}
+
+	return 0;
+}
+
 char *writeResponse(char *type, char *response_body){
 
 	if (response_body == NULL){
@@ -381,6 +436,21 @@ char *readFile(char *filename){
 
 	return buffer;
 
+}
+
+void writeFile(char *filename, char *content){
+	FILE *file = fopen(filename, "a");
+
+	if (file == NULL) {
+        fprintf(stderr, "Error opening file %s", filename);
+        return;
+    }
+
+	if (fprintf(file, "%s", content) < 0) {
+        fprintf(stderr, "Error writing to file %s", filename);
+    }
+
+	fclose(file);
 }
 
 char *getDirectoryPath(int argc, char **argv) {
