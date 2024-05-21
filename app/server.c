@@ -19,7 +19,7 @@ struct HttpRequest {
 };
 
 char *resp_200 = "HTTP/1.1 200 OK\r\n";
-char *resp_201 = "HTTP/1.1 201 Accepted\r\n\r\n";
+char *resp_201 = "HTTP/1.1 201 Created\r\n\r\n";
 char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
