@@ -49,7 +49,7 @@ int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
-int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
+int compressGZIP(const char *source, char **dest, size_t *dest_len);
 
 int main(int argc, char **argv) {
 	// Disable output buffering
@@ -272,9 +272,11 @@ int serverEcho(struct HttpRequest *request, int client){
 		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
-			char c_body[BUFFER_SIZE];
-			int c_len = compressGZIP(request->body, strlen(request->body), c_body, 1024);
-			printf("Gzip...%s", c_body);
+			size_t c_dest_len;
+    		char *c_body;
+			if (compressGZIP(request->body, &c_body, &c_dest_len) == 0) {
+				printf("Gzip...SuCCESS...%s", c_body);
+			}
 		}
 
 		char *echo_response = writeResponse("text/plain", &response);
@@ -603,15 +605,59 @@ void trimString(char *str) {
 
 }
 
-int compressGZIP(const char *input, int inputSize, char *output, int outputSize) {
-  z_stream zs = {0};
-  zs.avail_in = (uInt)inputSize;
-  zs.next_in = (Bytef *)input;
-  zs.avail_out = (uInt)outputSize;
-  zs.next_out = (Bytef *)output;
+int compressGZIP(const char *source, char **dest, size_t *dest_len) {
+    // Allocate memory for the destination buffer
+    *dest = (char *)malloc(BUFFER_SIZE);
+    if (*dest == NULL) {
+        fprintf(stderr, "Error allocating memory for destination buffer.\n");
+        return 1;
+    }
 
-  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
-  deflate(&zs, Z_FINISH);
-  deflateEnd(&zs);
-  return zs.total_out;
+    // Initialize the zlib stream for compression
+    z_stream stream;
+    stream.zalloc = Z_NULL;
+    stream.zfree = Z_NULL;
+    stream.opaque = Z_NULL;
+    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        fprintf(stderr, "Error initializing compression stream.\n");
+        free(*dest);
+        return 1;
+    }
+
+    stream.avail_in = strlen(source) + 1;  // Include null terminator
+    stream.next_in = (Bytef *)source;
+    stream.avail_out = BUFFER_SIZE;
+    stream.next_out = (Bytef *)*dest;
+
+    // Compress the input string
+    int ret;
+    do {
+        ret = deflate(&stream, Z_FINISH);
+        if (ret == Z_STREAM_ERROR) {
+            fprintf(stderr, "Error compressing data.\n");
+            deflateEnd(&stream);
+            free(*dest);
+            return 1;
+        }
+
+        // If output buffer is full, reallocate more memory
+        if (stream.avail_out == 0) {
+            *dest = (char *)realloc(*dest, stream.total_out + BUFFER_SIZE);
+            if (*dest == NULL) {
+                fprintf(stderr, "Error reallocating memory for destination buffer.\n");
+                deflateEnd(&stream);
+                return 1;
+            }
+            stream.next_out = (Bytef *)(*dest + stream.total_out);
+            stream.avail_out = BUFFER_SIZE;
+        }
+    } while (ret != Z_STREAM_END);
+
+    *dest_len = stream.total_out;
+
+    // Clean up
+    deflateEnd(&stream);
+
+    return 0;
 }
+
