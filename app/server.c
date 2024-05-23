@@ -273,7 +273,7 @@ int serverEcho(struct HttpRequest *request, int client){
 			strcpy(response.content_encoding, server_accepted_encoding);
 			size_t c_dest_len = 1024;
     		char c_body[BUFFER_SIZE];
-			if (compressGZIP(request->path, strlen(request->path), c_body, 1024) >= 0) {
+			if (compressGZIP(request->body, strlen(request->body), c_body, 1024) >= 0) {
 				char *hex_dest = (char *)malloc(c_dest_len * 2 + 1);
 				printf("Gzip...SuCCESS...%s\n", c_body);
 				printf("Compressed data: ");
