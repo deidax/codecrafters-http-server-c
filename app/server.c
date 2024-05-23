@@ -268,14 +268,27 @@ int serverEcho(struct HttpRequest *request, int client){
 		int count = 0;
 		char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
 
-		// check first accepted encoding for now, later on we could check multiple encodings
 		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
 			size_t c_dest_len;
     		char *c_body;
 			if (compressGZIP(request->body, &c_body, &c_dest_len) == 0) {
-				printf("Gzip...SuCCESS...%s", c_body);
+				char *hex_dest = (char *)malloc(c_dest_len * 2 + 1);
+				printf("Gzip...SuCCESS...\n");
+				printf("Compressed data: ");
+				if (hex_dest == NULL) {
+					fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
+					free(c_body);
+					return 1;
+				}
+
+				for (size_t i = 0; i < c_dest_len; i++) {
+					sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
+				}
+				hex_dest[c_dest_len * 2] = '\0';
+				printf("%s\n", hex_dest);
+				strcpy(response.body, hex_dest);
 			}
 		}
 
@@ -606,14 +619,12 @@ void trimString(char *str) {
 }
 
 int compressGZIP(const char *source, char **dest, size_t *dest_len) {
-    // Allocate memory for the destination buffer
     *dest = (char *)malloc(BUFFER_SIZE);
     if (*dest == NULL) {
         fprintf(stderr, "Error allocating memory for destination buffer.\n");
         return 1;
     }
 
-    // Initialize the zlib stream for compression
     z_stream stream;
     stream.zalloc = Z_NULL;
     stream.zfree = Z_NULL;
@@ -629,7 +640,6 @@ int compressGZIP(const char *source, char **dest, size_t *dest_len) {
     stream.avail_out = BUFFER_SIZE;
     stream.next_out = (Bytef *)*dest;
 
-    // Compress the input string
     int ret;
     do {
         ret = deflate(&stream, Z_FINISH);
@@ -640,7 +650,6 @@ int compressGZIP(const char *source, char **dest, size_t *dest_len) {
             return 1;
         }
 
-        // If output buffer is full, reallocate more memory
         if (stream.avail_out == 0) {
             *dest = (char *)realloc(*dest, stream.total_out + BUFFER_SIZE);
             if (*dest == NULL) {
