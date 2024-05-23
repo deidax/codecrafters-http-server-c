@@ -271,23 +271,23 @@ int serverEcho(struct HttpRequest *request, int client){
 		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
-			size_t c_dest_len;
+			size_t c_dest_len = 1024;
     		char c_body[BUFFER_SIZE];
-			if (compressGZIP(request->body, strlen(request->body), c_body, 1024) >= 0) {
+			if (compressGZIP(request->path, strlen(request->path), c_body, 1024) >= 0) {
 				char *hex_dest = (char *)malloc(c_dest_len * 2 + 1);
 				printf("Gzip...SuCCESS...%s\n", c_body);
-				// printf("Compressed data: ");
-				// if (hex_dest == NULL) {
-				// 	fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
-				// 	return 1;
-				// }
+				printf("Compressed data: ");
+				if (hex_dest == NULL) {
+					fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
+					return 1;
+				}
 
-				// for (size_t i = 0; i < c_dest_len; i++) {
-				// 	sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
-				// }
-				// hex_dest[c_dest_len * 2] = '\0';
-				// printf("%s\n", hex_dest);
-				strcpy(response.body, c_body);
+				for (size_t i = 0; i < c_dest_len; i++) {
+					sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
+				}
+				hex_dest[c_dest_len * 2] = '\0';
+				printf("%s\n", hex_dest);
+				strcpy(response.body, hex_dest);
 			}
 		}
 
