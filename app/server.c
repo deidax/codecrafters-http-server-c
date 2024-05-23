@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <zlib.h> 
 
 #define BUFFER_SIZE 4096
 
@@ -48,6 +49,7 @@ int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
+int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
 
 int main(int argc, char **argv) {
 	// Disable output buffering
@@ -270,6 +272,9 @@ int serverEcho(struct HttpRequest *request, int client){
 		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
+			char c_body[BUFFER_SIZE];
+			int c_len = compressGZIP(request->body, strlen(request->body), c_body, 1024);
+			printf("Gzip...%s", c_body);
 		}
 
 		char *echo_response = writeResponse("text/plain", &response);
@@ -596,4 +601,17 @@ void trimString(char *str) {
 
     strcpy(str, token);
 
+}
+
+int compressGZIP(const char *input, int inputSize, char *output, int outputSize) {
+  z_stream zs = {0};
+  zs.avail_in = (uInt)inputSize;
+  zs.next_in = (Bytef *)input;
+  zs.avail_out = (uInt)outputSize;
+  zs.next_out = (Bytef *)output;
+
+  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+  deflate(&zs, Z_FINISH);
+  deflateEnd(&zs);
+  return zs.total_out;
 }
