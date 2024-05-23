@@ -45,7 +45,8 @@ char *writeResponse(char *type, struct HttpResponse *response);
 char *getDirectoryPath(int argc, char **argv);
 int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
-void free_tokens(char** tokens);
+void trimString(char *str);
+void freeTokens(char** tokens);
 
 int main(int argc, char **argv) {
 	// Disable output buffering
@@ -178,7 +179,7 @@ void initHeader(char *header_value, size_t header_value_size, char *req_buffer, 
     char *header[2] = {NULL};
 
     while ((line = strtok_r(rest, "\r\n", &rest))) {
-        token = strtok(line, ": ");
+        token = strtok(line, ":");
         if (token) {
             header[0] = token;
             token = strtok(NULL, "");
@@ -198,6 +199,7 @@ void initHeader(char *header_value, size_t header_value_size, char *req_buffer, 
 
     strncpy(header_value, "no-value", header_value_size - 1);
     header_value[header_value_size - 1] = '\0';
+
 }
 
 
@@ -397,6 +399,8 @@ char *writeResponse(char *type, struct HttpResponse *response){
         return NULL;
     }
 
+	trimString(response->body);
+
 	if (strcmp(type, "text/plain") == 0){
 		size_t body_len = strlen(response->body);
 		size_t len = 0;
@@ -571,9 +575,19 @@ char** tokenizer(const char* str, const char* delim, int* count) {
     return tokens;
 }
 
-void free_tokens(char** tokens) {
+void freeTokens(char** tokens) {
     for (int i = 0; tokens[i] != NULL; i++) {
         free(tokens[i]);
     }
     free(tokens);
+}
+
+void trimString(char *str) {
+
+  char *token = strtok(str, " \t\n\r");
+
+  if (token)
+
+    strcpy(str, token);
+
 }
