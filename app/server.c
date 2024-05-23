@@ -30,7 +30,7 @@ char *resp_200 = "HTTP/1.1 200 OK\r\n";
 char *resp_201 = "HTTP/1.1 201 Created\r\n\r\n";
 char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 
-char *accepted_encoding[] = {"gzip"};
+char *server_accepted_encoding = "gzip";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
 void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body);
@@ -267,9 +267,9 @@ int serverEcho(struct HttpRequest *request, int client){
 		char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
 
 		// check first accepted encoding for now, later on we could check multiple encodings
-		if ( checkIfExistsInArray(accepted_encoding, sizeof(accepted_encoding) / sizeof(accepted_encoding[0]), accepted_encodings[0]) == 1){
+		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
-			strcpy(response.content_encoding, accepted_encodings[0]);
+			strcpy(response.content_encoding, server_accepted_encoding);
 		}
 
 		char *echo_response = writeResponse("text/plain", &response);
@@ -523,8 +523,9 @@ char *getDirectoryPath(int argc, char **argv) {
 int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value)
 {
 	for (int i = 0; i < origin_a_len; i++){
-		if (strcmp(origin_a[i], value) == 0)
+		if (strcmp(value, origin_a[i]) == 0){
 			return 1;
+		}
 	}
 
 	return 0;
