@@ -131,7 +131,7 @@ void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
 	int i = 0;
 
 	initHeader(request->user_agent, sizeof(request->user_agent), strdup(req_buffer), "User-Agent");
-	initHeader(request->accepted_encoding	, sizeof(request->accepted_encoding	), strdup(req_buffer), "Accept-Encoding");
+	initHeader(request->accepted_encoding	, sizeof(request->accepted_encoding), strdup(req_buffer), "Accept-Encoding");
 
 	while ((token = strtok_r(rest, " ", &rest))){
 		req_body[i++] = token;
@@ -199,6 +199,10 @@ void initHeader(char *header_value, size_t header_value_size, char *req_buffer, 
 
     strncpy(header_value, "no-value", header_value_size - 1);
     header_value[header_value_size - 1] = '\0';
+
+	for (int i = 0; i < strlen(header_value); i++) {
+        header_value[i] = tolower(header_value[i]);
+    }
 
 }
 
