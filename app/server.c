@@ -49,7 +49,7 @@ int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
-int compressGZIP(const char *source, char **dest, size_t *dest_len);
+int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
 
 int main(int argc, char **argv) {
 	// Disable output buffering
@@ -272,23 +272,22 @@ int serverEcho(struct HttpRequest *request, int client){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
 			size_t c_dest_len;
-    		char *c_body;
-			if (compressGZIP(request->body, &c_body, &c_dest_len) == 0) {
+    		char c_body[BUFFER_SIZE];
+			if (compressGZIP(request->body, strlen(request->body), c_body, 1024) >= 0) {
 				char *hex_dest = (char *)malloc(c_dest_len * 2 + 1);
-				printf("Gzip...SuCCESS...\n");
-				printf("Compressed data: ");
-				if (hex_dest == NULL) {
-					fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
-					free(c_body);
-					return 1;
-				}
+				printf("Gzip...SuCCESS...%s\n", c_body);
+				// printf("Compressed data: ");
+				// if (hex_dest == NULL) {
+				// 	fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
+				// 	return 1;
+				// }
 
-				for (size_t i = 0; i < c_dest_len; i++) {
-					sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
-				}
-				hex_dest[c_dest_len * 2] = '\0';
-				printf("%s\n", hex_dest);
-				strcpy(response.body, hex_dest);
+				// for (size_t i = 0; i < c_dest_len; i++) {
+				// 	sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
+				// }
+				// hex_dest[c_dest_len * 2] = '\0';
+				// printf("%s\n", hex_dest);
+				strcpy(response.body, c_body);
 			}
 		}
 
@@ -618,55 +617,19 @@ void trimString(char *str) {
 
 }
 
-int compressGZIP(const char *source, char **dest, size_t *dest_len) {
-    *dest = (char *)malloc(BUFFER_SIZE);
-    if (*dest == NULL) {
-        fprintf(stderr, "Error allocating memory for destination buffer.\n");
-        return 1;
-    }
+int compressGZIP(const char *input, int inputSize, char *output, int outputSize) {
+  z_stream zs = {0};
+  zs.avail_in = (uInt)inputSize;
+  zs.next_in = (Bytef *)input;
+  zs.avail_out = (uInt)outputSize;
+  zs.next_out = (Bytef *)output;
 
-    z_stream stream;
-    stream.zalloc = Z_NULL;
-    stream.zfree = Z_NULL;
-    stream.opaque = Z_NULL;
-    if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 31, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
-        fprintf(stderr, "Error initializing compression stream.\n");
-        free(*dest);
-        return 1;
-    }
+  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+  deflate(&zs, Z_FINISH);
+  deflateEnd(&zs);
 
-    stream.avail_in = strlen(source) + 1;  // Include null terminator
-    stream.next_in = (Bytef *)source;
-    stream.avail_out = BUFFER_SIZE;
-    stream.next_out = (Bytef *)*dest;
+  return zs.total_out;
 
-    int ret;
-    do {
-        ret = deflate(&stream, Z_FINISH);
-        if (ret == Z_STREAM_ERROR) {
-            fprintf(stderr, "Error compressing data.\n");
-            deflateEnd(&stream);
-            free(*dest);
-            return 1;
-        }
-
-        if (stream.avail_out == 0) {
-            *dest = (char *)realloc(*dest, stream.total_out + BUFFER_SIZE);
-            if (*dest == NULL) {
-                fprintf(stderr, "Error reallocating memory for destination buffer.\n");
-                deflateEnd(&stream);
-                return 1;
-            }
-            stream.next_out = (Bytef *)(*dest + stream.total_out);
-            stream.avail_out = BUFFER_SIZE;
-        }
-    } while (ret != Z_STREAM_END);
-
-    *dest_len = stream.total_out;
-
-    // Clean up
-    deflateEnd(&stream);
-
-    return 0;
 }
+
 
