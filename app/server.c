@@ -677,6 +677,3 @@ int compressGZIP(const char *input, int inputSize, char *output, int outputSize)
   return zs.total_out;
 
 }
-
-
-
