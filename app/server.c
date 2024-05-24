@@ -265,75 +265,71 @@ void processResponse(struct HttpRequest *request, int client, char *directory){
 	}
 }
 
-int serverEcho(struct HttpRequest *request, int client){
-	char *token = NULL;
-	char *rest = strdup(request->path);
-	char *echo_path[2] = {NULL};
-	int i = 0;
-	while ((token = strtok_r(rest, "/", &rest))){
-		echo_path[i++] = token;
-		if (i >= 2)
-			break;
-	}
+int serverEcho(struct HttpRequest *request, int client) {
+    char *token = NULL;
+    char *rest = strdup(request->path);
+    char *echo_path[2] = {NULL};
+    int i = 0;
+    while ((token = strtok_r(rest, "/", &rest))){
+        echo_path[i++] = token;
+        if (i >= 2)
+            break;
+    }
 
-	int echo = strcmp(echo_path[0], "echo");
+    int echo = strcmp(echo_path[0], "echo");
 
-	if (echo == 0){
+    if (echo == 0){
+        struct HttpResponse response;
+        initHttpResponse(&response, resp_200, "", echo_path[1]);
 
-		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", echo_path[1]);
+        printf(".....%s\n", response.body);
 
-		printf(".....%s\n", response.body);
+        int count = 0;
+        char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
 
-		int count = 0;
-		char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
+        if (checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1) {
+            printf("ENCODING...FOUND...%s\n", request->accepted_encoding);
+            strcpy(response.content_encoding, server_accepted_encoding);
 
-		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
+            const char *input = request->body;
+            size_t input_size = strlen(input);
+            unsigned char *compressed_output = NULL;
+            size_t compressed_size = 0;
 
-			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
-			strcpy(response.content_encoding, server_accepted_encoding);
+            // Compress the input
+            int ret = gzip_compress(input, input_size, &compressed_output, &compressed_size);
+            if (ret != Z_OK) {
+                fprintf(stderr, "GZIP compression failed: %d\n", ret);
+                freeTokens(accepted_encodings);
+                return 1;
+            }
 
-			const char *input = request->body;
-			size_t input_size = strlen(input);
-			unsigned char *compressed_output = NULL;
-			size_t compressed_size = 0;
-			char *decompressed_output = NULL;
-			size_t decompressed_size = 0;
+            printf("Input size: %zu bytes\n", input_size);
+            printf("Compressed size: %zu bytes\n", compressed_size);
 
-			// Compress the input
-			int ret = gzip_compress(input, input_size, &compressed_output, &compressed_size);
-			if (ret != Z_OK) {
-				fprintf(stderr, "GZIP compression failed: %d\n", ret);
-				return 1;
-			}
+            // Convert compressed data to hex string
+            char *hex_output = stringToHex((const char *)compressed_output);
+            strcpy(response.body, hex_output);
+            free(hex_output);
+            free(compressed_output);
 
-			printf("Input size: %zu bytes\n", input_size);
-			printf("Compressed size: %zu bytes\n", compressed_size);
+            printf("\n");
+        }
 
-			// Optionally print the compressed data as a hex string
-			for (size_t i = 0; i < compressed_size; i++) {
-				printf("%02x", compressed_output[i]);
-			}
-			strcpy(response.body, compressed_output);
-			printf("\n");
+        char *echo_response = writeResponse("text/plain", &response);
 
-		}
+        if (echo_response != NULL) {
+            send(client, echo_response, strlen(echo_response), 0);
+            free(echo_response);
+        }
 
-		char *echo_response = writeResponse("text/plain", &response);
+        freeTokens(accepted_encodings);
+        return 1; // server echo success
+    }
 
-		if (echo_response != NULL){
-
-			send(client, echo_response, strlen(echo_response),0);
-			free(echo_response);
-		}
-		
-		return 1; //server echo success
-	}
-	
-
-	return 0; //server echo 404
-
+    return 0; // server echo 404
 }
+
 
 int requestUserAgent(struct HttpRequest *request, int client){
 	char *token = NULL;
@@ -438,70 +434,66 @@ int postFile(struct HttpRequest *request, int client, char *directory){
 	return 0;
 }
 
-char *writeResponse(char *type, struct HttpResponse *response){
+char *writeResponse(char *type, struct HttpResponse *response) {
+    if (response->body == NULL) {
+        return NULL;
+    }
 
-	if (response->body == NULL){
-		return NULL;
-	}
-
-	char *buffer = (char *)malloc(BUFFER_SIZE);
-
-	if (buffer == NULL) {
+    char *buffer = (char *)malloc(BUFFER_SIZE);
+    if (buffer == NULL) {
         printf("SERVER ERROR");
         return NULL;
     }
 
-	trimString(response->body);
+    trimString(response->body);
 
-	if (strcmp(type, "text/plain") == 0){
-		size_t body_len = strlen(response->body);
-		size_t len = 0;
-		size_t cnt_len = 0;
-		
-		if (body_len > 0){
-			
-			if (response->content_encoding[0] != '\0'){
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
-			}
-			else{
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
-			}
+    if (strcmp(type, "text/plain") == 0) {
+        size_t body_len = strlen(response->body);
+        size_t len = 0;
 
-		}
-		
-		if (len < 0 || len >= BUFFER_SIZE) {
-			printf("SERVER ERROR");
-			free(buffer);
-			return NULL;
-		}
-	}
+        if (body_len > 0) {
+            if (response->content_encoding[0] != '\0') {
+                // Calculate hex length for compressed data
+                size_t hex_len = body_len * 2;
+                len = snprintf(buffer, BUFFER_SIZE, "%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, response->content_encoding, hex_len, response->body);
+            } else {
+                len = snprintf(buffer, BUFFER_SIZE, "%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
+            }
+        }
 
-	else if (strcmp(type, "application/octet-stream") == 0){
-		printf("READING FILE %s...", response->body);
-		char *file_data = readFile(response->body);
+        if (len < 0 || len >= BUFFER_SIZE) {
+            printf("SERVER ERROR");
+            free(buffer);
+            return NULL;
+        }
+    } else if (strcmp(type, "application/octet-stream") == 0) {
+        printf("READING FILE %s...", response->body);
+        char *file_data = readFile(response->body);
 
-		if (file_data == NULL){
-			return NULL;
-		}
+        if (file_data == NULL) {
+            free(buffer);
+            return NULL;
+        }
 
-		printf("FILE-CONTENT:\n%s\n", file_data);
-		size_t body_len = strlen(file_data);
-		size_t len = 0;
+        printf("FILE-CONTENT:\n%s\n", file_data);
+        size_t body_len = strlen(file_data);
+        size_t len = 0;
 
-		if (body_len > 0){
-			len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: application/octet-stream\r\nContent-Length: %zu\r\n\r\n%s",response->status, body_len, file_data);
-		}
-		
-		if (len < 0 || len >= BUFFER_SIZE) {
-			printf("SERVER ERROR");
-			free(buffer);
-			return NULL;
-		}
-		free(file_data);
-	}
+        if (body_len > 0) {
+            len = snprintf(buffer, BUFFER_SIZE, "%sContent-Type: application/octet-stream\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, file_data);
+        }
 
-	return buffer;
+        if (len < 0 || len >= BUFFER_SIZE) {
+            printf("SERVER ERROR");
+            free(buffer);
+            return NULL;
+        }
+        free(file_data);
+    }
+
+    return buffer;
 }
+
 
 char *readFile(char *filename){
 	FILE *file = fopen(filename, "rb");
@@ -704,4 +696,14 @@ void print_bytes(char *by, size_t len) {
   }
   printf("]");
 
+}
+
+char* stringToHex(const char* input) {
+    size_t len = strlen(input);
+    char* output = malloc(len * 2 + 1);
+    for (size_t i = 0; i < len; i++) {
+        sprintf(output + i * 2, "%02x", (unsigned char)input[i]);
+    }
+    output[len * 2] = '\0';
+    return output;
 }
