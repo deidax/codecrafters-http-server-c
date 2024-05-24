@@ -50,6 +50,7 @@ char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
 int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
+void print_bytes(char *by, size_t len);
 char* stringToHex(const char* input);
 
 int uncompressFromGzip(const char *input, int inputSize, char *output, int outputSize) {
@@ -300,7 +301,8 @@ int serverEcho(struct HttpRequest *request, int client){
 				return 0;
 			}
 
-			printf("GZIP ---> %s\n", body);
+			printf("GZIP ---> %d\n", len);
+			print_bytes(body, len);
 			strcpy(response.body, body);
 
 		}
@@ -644,5 +646,19 @@ int compressGZIP(const char *input, int inputSize, char *output, int outputSize)
 	deflate(&zs, Z_FINISH);
 	deflateEnd(&zs);
 	return zs.total_out;
+
+}
+
+void print_bytes(char *by, size_t len) {
+
+  unsigned char *bytes = (unsigned char *)by;
+  printf("[");
+  for (size_t i = 0; i < len; ++i) {
+    printf("%02x", bytes[i]);
+    if (i < len - 1) {
+      printf(", ");
+    }
+  }
+  printf("]");
 
 }
