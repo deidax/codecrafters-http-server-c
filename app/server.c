@@ -25,7 +25,6 @@ struct HttpResponse {
 	char status[BUFFER_SIZE];
 	char content_encoding[BUFFER_SIZE];
 	char body[BUFFER_SIZE];
-	int body_len;
 };
 
 char *resp_200 = "HTTP/1.1 200 OK\r\n";
@@ -35,7 +34,7 @@ char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 char *server_accepted_encoding = "gzip";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
-void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body, int body_len);
+void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body);
 void initHeader(char *header_value, size_t header_value_size, char *req_buffer, const char *header_name); 
 void processResponse(struct HttpRequest *request, int client, char *directory);
 int serverEcho(struct HttpRequest *request, int client);
@@ -50,7 +49,7 @@ int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
-int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
+int gzip_compress(const char *input, size_t input_size, unsigned char **output, size_t *output_size);
 void print_bytes(char *by, size_t len);
 char* stringToHex(const char* input);
 
@@ -184,7 +183,7 @@ void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
 	
 }
 
-void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body, int body_len) {
+void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body) {
 
     strncpy(response->status, status, sizeof(response->status) - 1);
     strncpy(response->content_encoding, content_encoding, sizeof(response->content_encoding) - 1);
@@ -193,8 +192,6 @@ void initHttpResponse(struct HttpResponse *response, char *status, char *content
     response->status[sizeof(response->status) - 1] = '\0';
     response->content_encoding[sizeof(response->content_encoding) - 1] = '\0';
     response->body[sizeof(response->body) - 1] = '\0';
-
-	response->body_len = body_len;
 
 }
 
@@ -284,7 +281,7 @@ int serverEcho(struct HttpRequest *request, int client){
 	if (echo == 0){
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", echo_path[1], strlen(echo_path[1]));
+		initHttpResponse(&response, resp_200, "", echo_path[1]);
 
 		printf(".....%s\n", response.body);
 
@@ -296,18 +293,29 @@ int serverEcho(struct HttpRequest *request, int client){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
 
-			char body[BUFFER_SIZE];
+			const char *input = request->body;
+			size_t input_size = strlen(input);
+			unsigned char *compressed_output = NULL;
+			size_t compressed_size = 0;
+			char *decompressed_output = NULL;
+			size_t decompressed_size = 0;
 
-			int len = compressGZIP(response.body, strlen(response.body), body, 1024);
-			if (len < 0){
-				printf("ERROR COMPRESSING");
-				return 0;
+			// Compress the input
+			int ret = gzip_compress(input, input_size, &compressed_output, &compressed_size);
+			if (ret != Z_OK) {
+				fprintf(stderr, "GZIP compression failed: %d\n", ret);
+				return 1;
 			}
 
-			printf("GZIP ---> %d\n", len);
-			print_bytes(body, len);
-			response.body_len = len;
-			strcpy(response.body, body);
+			printf("Input size: %zu bytes\n", input_size);
+			printf("Compressed size: %zu bytes\n", compressed_size);
+
+			// Optionally print the compressed data as a hex string
+			for (size_t i = 0; i < compressed_size; i++) {
+				printf("%02x", compressed_output[i]);
+			}
+			strcpy(response.body, compressed_output);
+			printf("\n");
 
 		}
 
@@ -342,7 +350,7 @@ int requestUserAgent(struct HttpRequest *request, int client){
 	if (user_agent == 0){
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", request->user_agent, strlen(request->user_agent));
+		initHttpResponse(&response, resp_200, "", request->user_agent);
 
 		char *user_agent_response = writeResponse("text/plain", &response);
 
@@ -380,7 +388,7 @@ int requestFile(struct HttpRequest *request, int client, char *directory){
 		printf("directory %s\n", dir_file);
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", dir_file, strlen(dir_file));
+		initHttpResponse(&response, resp_200, "", dir_file);
 
 		char *file_response = writeResponse("application/octet-stream", &response);
 		free(dir_file);
@@ -446,17 +454,17 @@ char *writeResponse(char *type, struct HttpResponse *response){
 	trimString(response->body);
 
 	if (strcmp(type, "text/plain") == 0){
-		int body_len = response->body_len;
+		size_t body_len = strlen(response->body);
 		size_t len = 0;
 		size_t cnt_len = 0;
 		
 		if (body_len > 0){
 			
 			if (response->content_encoding[0] != '\0'){
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
+				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
 			}
 			else{
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", response->status, body_len, response->body);
+				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
 			}
 
 		}
@@ -637,20 +645,51 @@ void trimString(char *str) {
 
 }
 
-int compressGZIP(const char *input, int inputSize, char *output, int outputSize) {
-	z_stream zs = {0};
-	zs.zalloc = Z_NULL;
-	zs.zfree = Z_NULL;
-	zs.opaque = Z_NULL;
-	zs.avail_in = (uInt)inputSize;
-	zs.next_in = (Bytef *)input;
-	zs.avail_out = (uInt)outputSize;
-	zs.next_out = (Bytef *)output;
-	deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
-	deflate(&zs, Z_FINISH);
-	deflateEnd(&zs);
-	return zs.total_out;
+int gzip_compress(const char *input, size_t input_size, unsigned char **output, size_t *output_size) {
+    z_stream strm;
+    int ret;
+    unsigned char out_buffer[8192];
 
+    // Allocate the output buffer
+    *output = NULL;
+    *output_size = 0;
+
+    // Initialize zlib stream
+    memset(&strm, 0, sizeof(strm));
+    ret = deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
+    if (ret != Z_OK) {
+        return ret;
+    }
+
+    // Set input data
+    strm.next_in = (unsigned char *)input;
+    strm.avail_in = input_size;
+
+    do {
+        strm.next_out = out_buffer;
+        strm.avail_out = sizeof(out_buffer);
+
+        ret = deflate(&strm, Z_FINISH);
+        if (ret != Z_STREAM_END && ret != Z_OK && ret != Z_BUF_ERROR) {
+            deflateEnd(&strm);
+            return ret;
+        }
+
+        // Calculate the size of the compressed data
+        size_t have = sizeof(out_buffer) - strm.avail_out;
+        *output = realloc(*output, *output_size + have);
+        if (*output == NULL) {
+            deflateEnd(&strm);
+            return Z_MEM_ERROR;
+        }
+
+        // Copy the compressed data to the output buffer
+        memcpy(*output + *output_size, out_buffer, have);
+        *output_size += have;
+    } while (strm.avail_out == 0);
+
+    deflateEnd(&strm);
+    return Z_OK;
 }
 
 void print_bytes(char *by, size_t len) {
