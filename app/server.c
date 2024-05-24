@@ -269,26 +269,45 @@ int serverEcho(struct HttpRequest *request, int client){
 		char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
 
 		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
+
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
-			size_t c_dest_len = 1024;
-    		char c_body[BUFFER_SIZE];
-			if (compressGZIP(request->body, strlen(request->body), c_body, 1024) >= 0) {
-				char *hex_dest = (char *)malloc(c_dest_len * 2 + 1);
-				printf("Gzip...SuCCESS...%s\n", c_body);
-				printf("Compressed data: ");
-				if (hex_dest == NULL) {
-					fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
-					return 1;
-				}
 
-				for (size_t i = 0; i < c_dest_len; i++) {
-					sprintf(&hex_dest[i * 2], "%02x", (unsigned char)c_body[i]);
-				}
-				hex_dest[c_dest_len * 2] = '\0';
-				printf("%s\n", hex_dest);
-				strcpy(response.body, hex_dest);
+			int input_size = strlen(request->body) + 1;
+			int compressed_size = input_size * 2;
+			char *compressed_data = (char *)malloc(compressed_size);
+			if (compressed_data == NULL) {
+				fprintf(stderr, "Error allocating memory for compressed data.\n");
+				return 1;
 			}
+			
+			int compressed_data_size = compressGZIP(request->body, input_size, compressed_data, compressed_size);
+
+			if (compressed_data_size < 0) {
+				fprintf(stderr, "Error compressing data.\n");
+				free(compressed_data);
+				return 1;
+			}
+
+			char *hex_dest = (char *)malloc(compressed_data_size * 2 + 1);
+			
+			if (hex_dest == NULL) {
+				fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
+				return 1;
+			}
+
+			for (int i = 0; i < compressed_data_size; i++) {
+				sprintf(&hex_dest[i * 2], "%02x", (unsigned char)compressed_data[i]);
+			}
+
+			printf("Gzip...SuCCESS...%s\n", compressed_data);
+			printf("Compressed data: ");
+
+			hex_dest[compressed_data_size * 2] = '\0';
+			printf("%s\n", hex_dest);
+			strcpy(response.body, hex_dest);
+			free(compressed_data);
+
 		}
 
 		char *echo_response = writeResponse("text/plain", &response);
