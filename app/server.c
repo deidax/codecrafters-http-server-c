@@ -292,48 +292,16 @@ int serverEcho(struct HttpRequest *request, int client){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
 
-			int inputSize = strlen(response.body) + 1;  // Include null terminator
+			char body[BUFFER_SIZE];
 
-			// Allocate memory for the compressed data
-			int compressedSize = inputSize * 2;  // Assume compressed size won't exceed 2 times the input size
-			char *compressedData = (char *)malloc(compressedSize);
-			if (compressedData == NULL) {
-				fprintf(stderr, "Error allocating memory for compressed data.\n");
+			int len = compressGZIP(response.body, strlen(response.body), body, 1024);
+			if (len < 0){
+				printf("ERROR COMPRESSING");
 				return 0;
 			}
 
-			// Compress the input string
-			int compressedDataSize = compressGZIP(response.body, inputSize, compressedData, compressedSize);
-			if (compressedDataSize < 0) {
-				fprintf(stderr, "Error compressing data.\n");
-				free(compressedData);
-				return 0;
-			}
-
-			// Print the compressed data as hexadecimal
-			printf("Compressed data (hexadecimal representation): ");
-			char* hex = (char*)malloc(compressedDataSize * 2 + 1);
-			if (hex == NULL) {
-				fprintf(stderr, "Error allocating memory for hexadecimal representation.\n");
-				return 0;
-			}
-
-			for (int i = 0; i < compressedDataSize; i++) {
-				sprintf(hex + i * 2, "%02x", (unsigned char)compressedData[i]);
-			}
-			hex[compressedDataSize * 2] = '\0';
-			printf("\nCompressed size: %d\n", compressedDataSize);
-			
-			if (hex == NULL) {
-				printf("Hexadecimal representation: %s\n", hex);
-				free(hex);
-				return 0;
-			}
-
-			strcpy(response.body, hex);
-
-
-			free(compressedData);
+			printf("GZIP ---> %s\n", body);
+			strcpy(response.body, body);
 
 		}
 
@@ -664,16 +632,17 @@ void trimString(char *str) {
 }
 
 int compressGZIP(const char *input, int inputSize, char *output, int outputSize) {
-  z_stream zs = {0};
-  zs.avail_in = (uInt)inputSize;
-  zs.next_in = (Bytef *)input;
-  zs.avail_out = (uInt)outputSize;
-  zs.next_out = (Bytef *)output;
-
-  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
-  deflate(&zs, Z_FINISH);
-  deflateEnd(&zs);
-
-  return zs.total_out;
+	z_stream zs = {0};
+	zs.zalloc = Z_NULL;
+	zs.zfree = Z_NULL;
+	zs.opaque = Z_NULL;
+	zs.avail_in = (uInt)inputSize;
+	zs.next_in = (Bytef *)input;
+	zs.avail_out = (uInt)outputSize;
+	zs.next_out = (Bytef *)output;
+	deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+	deflate(&zs, Z_FINISH);
+	deflateEnd(&zs);
+	return zs.total_out;
 
 }
