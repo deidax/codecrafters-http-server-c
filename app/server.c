@@ -25,6 +25,7 @@ struct HttpResponse {
 	char status[BUFFER_SIZE];
 	char content_encoding[BUFFER_SIZE];
 	char body[BUFFER_SIZE];
+	int body_len;
 };
 
 char *resp_200 = "HTTP/1.1 200 OK\r\n";
@@ -34,7 +35,7 @@ char *resp_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
 char *server_accepted_encoding = "gzip";
 
 void initHttpRequest(struct HttpRequest *request, char *req_buffer);
-void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body);
+void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body, int body_len);
 void initHeader(char *header_value, size_t header_value_size, char *req_buffer, const char *header_name); 
 void processResponse(struct HttpRequest *request, int client, char *directory);
 int serverEcho(struct HttpRequest *request, int client);
@@ -183,7 +184,7 @@ void initHttpRequest(struct HttpRequest *request, char *req_buffer) {
 	
 }
 
-void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body) {
+void initHttpResponse(struct HttpResponse *response, char *status, char *content_encoding, char *body, int body_len) {
 
     strncpy(response->status, status, sizeof(response->status) - 1);
     strncpy(response->content_encoding, content_encoding, sizeof(response->content_encoding) - 1);
@@ -192,6 +193,8 @@ void initHttpResponse(struct HttpResponse *response, char *status, char *content
     response->status[sizeof(response->status) - 1] = '\0';
     response->content_encoding[sizeof(response->content_encoding) - 1] = '\0';
     response->body[sizeof(response->body) - 1] = '\0';
+
+	response->body_len = body_len;
 
 }
 
@@ -281,7 +284,7 @@ int serverEcho(struct HttpRequest *request, int client){
 	if (echo == 0){
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", echo_path[1]);
+		initHttpResponse(&response, resp_200, "", echo_path[1], strlen(echo_path[1]));
 
 		printf(".....%s\n", response.body);
 
@@ -303,6 +306,7 @@ int serverEcho(struct HttpRequest *request, int client){
 
 			printf("GZIP ---> %d\n", len);
 			print_bytes(body, len);
+			response.body_len = len;
 			strcpy(response.body, body);
 
 		}
@@ -338,7 +342,7 @@ int requestUserAgent(struct HttpRequest *request, int client){
 	if (user_agent == 0){
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", request->user_agent);
+		initHttpResponse(&response, resp_200, "", request->user_agent, strlen(request->user_agent));
 
 		char *user_agent_response = writeResponse("text/plain", &response);
 
@@ -376,7 +380,7 @@ int requestFile(struct HttpRequest *request, int client, char *directory){
 		printf("directory %s\n", dir_file);
 
 		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", dir_file);
+		initHttpResponse(&response, resp_200, "", dir_file, strlen(dir_file));
 
 		char *file_response = writeResponse("application/octet-stream", &response);
 		free(dir_file);
@@ -442,17 +446,17 @@ char *writeResponse(char *type, struct HttpResponse *response){
 	trimString(response->body);
 
 	if (strcmp(type, "text/plain") == 0){
-		size_t body_len = strlen(response->body);
+		int body_len = response->body_len;
 		size_t len = 0;
 		size_t cnt_len = 0;
 		
 		if (body_len > 0){
 			
 			if (response->content_encoding[0] != '\0'){
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
+				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
 			}
 			else{
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
+				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", response->status, body_len, response->body);
 			}
 
 		}
