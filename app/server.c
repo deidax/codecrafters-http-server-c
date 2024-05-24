@@ -43,7 +43,7 @@ int requestFile(struct HttpRequest *request, int client, char *directory);
 int postFile(struct HttpRequest *request, int client, char *directory);
 char *readFile(char *filename);
 void writeFile(char *filename, char *content);
-char *writeResponse(char *type, struct HttpResponse *response);
+char *writeResponse(char *type, struct HttpResponse *response, size_t body_len) ;
 char *getDirectoryPath(int argc, char **argv);
 int checkIfExistsInArray(char *origin_a[], int origin_a_len, char *value);
 char** tokenizer(const char* str, const char* delim, int* count);
@@ -265,75 +265,68 @@ void processResponse(struct HttpRequest *request, int client, char *directory){
 	}
 }
 
-int serverEcho(struct HttpRequest *request, int client){
-	char *token = NULL;
-	char *rest = strdup(request->path);
-	char *echo_path[2] = {NULL};
-	int i = 0;
-	while ((token = strtok_r(rest, "/", &rest))){
-		echo_path[i++] = token;
-		if (i >= 2)
-			break;
-	}
+int serverEcho(struct HttpRequest *request, int client) {
+    char *token = NULL;
+    char *rest = strdup(request->path);
+    char *echo_path[2] = {NULL};
+    int i = 0;
+    while ((token = strtok_r(rest, "/", &rest))){
+        echo_path[i++] = token;
+        if (i >= 2)
+            break;
+    }
 
-	int echo = strcmp(echo_path[0], "echo");
+    int echo = strcmp(echo_path[0], "echo");
 
-	if (echo == 0){
+    if (echo == 0) {
+        struct HttpResponse response;
+        initHttpResponse(&response, resp_200, "", echo_path[1]);
 
-		struct HttpResponse response;
-		initHttpResponse(&response, resp_200, "", echo_path[1]);
+        printf(".....%s\n", response.body);
 
-		printf(".....%s\n", response.body);
+        int count = 0;
+        char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
 
-		int count = 0;
-		char **accepted_encodings = tokenizer(request->accepted_encoding, ", ", &count);
+        if (checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1) {
+            printf("ENCODING...FOUND...%s\n", request->accepted_encoding);
+            strcpy(response.content_encoding, server_accepted_encoding);
 
-		if ( checkIfExistsInArray(accepted_encodings, count, server_accepted_encoding) == 1){
+            const char *input = request->body;
+            size_t input_size = strlen(input);
+            unsigned char *compressed_output = NULL;
+            size_t compressed_size = 0;
 
-			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
-			strcpy(response.content_encoding, server_accepted_encoding);
+            // Compress the input
+            int ret = gzip_compress(input, input_size, &compressed_output, &compressed_size);
+            if (ret != Z_OK) {
+                fprintf(stderr, "GZIP compression failed: %d\n", ret);
+                freeTokens(accepted_encodings);
+                return 1;
+            }
 
-			const char *input = request->body;
-			size_t input_size = strlen(input);
-			unsigned char *compressed_output = NULL;
-			size_t compressed_size = 0;
-			char *decompressed_output = NULL;
-			size_t decompressed_size = 0;
+            printf("Input size: %zu bytes\n", input_size);
+            printf("Compressed size: %zu bytes\n", compressed_size);
 
-			// Compress the input
-			int ret = gzip_compress(input, input_size, &compressed_output, &compressed_size);
-			if (ret != Z_OK) {
-				fprintf(stderr, "GZIP compression failed: %d\n", ret);
-				return 1;
-			}
+            // Copy compressed data to response body
+            memcpy(response.body, compressed_output, compressed_size);
+            response.body[compressed_size] = '\0';  // Null terminate
 
-			printf("Input size: %zu bytes\n", input_size);
-			printf("Compressed size: %zu bytes\n", compressed_size);
+            char *echo_response = writeResponse("application/gzip", &response, compressed_size);
 
-			// Optionally print the compressed data as a hex string
-			for (size_t i = 0; i < compressed_size; i++) {
-				printf("%02x", compressed_output[i]);
-			}
-			strcpy(response.body, compressed_output);
-			printf("\n");
+            if (echo_response != NULL) {
+                send(client, echo_response, strlen(echo_response), 0);
+                free(echo_response);
+            }
 
-		}
+            free(compressed_output);
+            freeTokens(accepted_encodings);
+            return 1; // server echo success
+        }
+    }
 
-		char *echo_response = writeResponse("text/plain", &response);
-
-		if (echo_response != NULL){
-
-			send(client, echo_response, strlen(echo_response),0);
-			free(echo_response);
-		}
-		
-		return 1; //server echo success
-	}
-	
-
-	return 0; //server echo 404
-
+    return 0; // server echo 404
 }
+
 
 int requestUserAgent(struct HttpRequest *request, int client){
 	char *token = NULL;
@@ -352,7 +345,7 @@ int requestUserAgent(struct HttpRequest *request, int client){
 		struct HttpResponse response;
 		initHttpResponse(&response, resp_200, "", request->user_agent);
 
-		char *user_agent_response = writeResponse("text/plain", &response);
+		char *user_agent_response = writeResponse("text/plain", &response, strlen(response.body));
 
 		if (user_agent_response != NULL){
 			send(client, user_agent_response, strlen(user_agent_response),0);
@@ -390,7 +383,7 @@ int requestFile(struct HttpRequest *request, int client, char *directory){
 		struct HttpResponse response;
 		initHttpResponse(&response, resp_200, "", dir_file);
 
-		char *file_response = writeResponse("application/octet-stream", &response);
+		char *file_response = writeResponse("application/octet-stream", &response, strlen(response.body));
 		free(dir_file);
 		if (file_response != NULL){
 			send(client, file_response, strlen(file_response),0);
@@ -438,69 +431,41 @@ int postFile(struct HttpRequest *request, int client, char *directory){
 	return 0;
 }
 
-char *writeResponse(char *type, struct HttpResponse *response){
+char *writeResponse(char *type, struct HttpResponse *response, size_t body_len) {
+    if (response->body == NULL) {
+        return NULL;
+    }
 
-	if (response->body == NULL){
-		return NULL;
-	}
-
-	char *buffer = (char *)malloc(BUFFER_SIZE);
-
-	if (buffer == NULL) {
+    char *buffer = (char *)malloc(BUFFER_SIZE);
+    if (buffer == NULL) {
         printf("SERVER ERROR");
         return NULL;
     }
 
-	trimString(response->body);
+    trimString(response->body);
 
-	if (strcmp(type, "text/plain") == 0){
-		size_t body_len = strlen(response->body);
-		size_t len = 0;
-		size_t cnt_len = 0;
-		
-		if (body_len > 0){
-			
-			if (response->content_encoding[0] != '\0'){
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, response->content_encoding, body_len, response->body);
-			}
-			else{
-				len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: text/plain\r\nContent-Length: %zu\r\n\r\n%s", response->status, body_len, response->body);
-			}
+    size_t len = 0;
 
-		}
-		
-		if (len < 0 || len >= BUFFER_SIZE) {
-			printf("SERVER ERROR");
-			free(buffer);
-			return NULL;
-		}
-	}
+    if (strcmp(type, "text/plain") == 0 || strcmp(type, "application/gzip") == 0) {
+        if (body_len > 0) {
+            if (response->content_encoding[0] != '\0') {
+                len = snprintf(buffer, BUFFER_SIZE, "%sContent-Encoding: %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", response->status, response->content_encoding, type, body_len);
+            } else {
+                len = snprintf(buffer, BUFFER_SIZE, "%sContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", response->status, type, body_len);
+            }
 
-	else if (strcmp(type, "application/octet-stream") == 0){
-		printf("READING FILE %s...", response->body);
-		char *file_data = readFile(response->body);
+            if (len < 0 || len >= BUFFER_SIZE) {
+                printf("SERVER ERROR");
+                free(buffer);
+                return NULL;
+            }
 
-		if (file_data == NULL){
-			return NULL;
-		}
+            memcpy(buffer + len, response->body, body_len);
+            len += body_len;
+        }
+    }
 
-		printf("FILE-CONTENT:\n%s\n", file_data);
-		size_t body_len = strlen(file_data);
-		size_t len = 0;
-
-		if (body_len > 0){
-			len = snprintf(buffer, BUFFER_SIZE,"%sContent-Type: application/octet-stream\r\nContent-Length: %zu\r\n\r\n%s",response->status, body_len, file_data);
-		}
-		
-		if (len < 0 || len >= BUFFER_SIZE) {
-			printf("SERVER ERROR");
-			free(buffer);
-			return NULL;
-		}
-		free(file_data);
-	}
-
-	return buffer;
+    return buffer;
 }
 
 char *readFile(char *filename){
@@ -650,18 +615,15 @@ int gzip_compress(const char *input, size_t input_size, unsigned char **output, 
     int ret;
     unsigned char out_buffer[8192];
 
-    // Allocate the output buffer
     *output = NULL;
     *output_size = 0;
 
-    // Initialize zlib stream
     memset(&strm, 0, sizeof(strm));
     ret = deflateInit2(&strm, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
     if (ret != Z_OK) {
         return ret;
     }
 
-    // Set input data
     strm.next_in = (unsigned char *)input;
     strm.avail_in = input_size;
 
@@ -675,7 +637,6 @@ int gzip_compress(const char *input, size_t input_size, unsigned char **output, 
             return ret;
         }
 
-        // Calculate the size of the compressed data
         size_t have = sizeof(out_buffer) - strm.avail_out;
         *output = realloc(*output, *output_size + have);
         if (*output == NULL) {
@@ -683,7 +644,6 @@ int gzip_compress(const char *input, size_t input_size, unsigned char **output, 
             return Z_MEM_ERROR;
         }
 
-        // Copy the compressed data to the output buffer
         memcpy(*output + *output_size, out_buffer, have);
         *output_size += have;
     } while (strm.avail_out == 0);
@@ -691,6 +651,7 @@ int gzip_compress(const char *input, size_t input_size, unsigned char **output, 
     deflateEnd(&strm);
     return Z_OK;
 }
+
 
 void print_bytes(char *by, size_t len) {
 
