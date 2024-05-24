@@ -50,6 +50,25 @@ char** tokenizer(const char* str, const char* delim, int* count);
 void trimString(char *str);
 void freeTokens(char** tokens);
 int compressGZIP(const char *input, int inputSize, char *output, int outputSize);
+char* stringToHex(const char* input);
+
+int uncompressFromGzip(const char *input, int inputSize, char *output, int outputSize) {
+    z_stream zs = {0};
+    zs.zalloc = Z_NULL;
+    zs.zfree = Z_NULL;
+    zs.opaque = Z_NULL;
+    zs.avail_in = (uInt)inputSize;
+    zs.next_in = (Bytef *)input;
+    zs.avail_out = (uInt)outputSize;
+    zs.next_out = (Bytef *)output;
+
+    inflateInit2(&zs, 16 + MAX_WBITS); // Add 16 to windowBits to enable gzip decoding
+    inflate(&zs, Z_FINISH);
+    inflateEnd(&zs);
+
+    return zs.total_out;
+}
+
 
 int main(int argc, char **argv) {
 	// Disable output buffering
@@ -273,40 +292,48 @@ int serverEcho(struct HttpRequest *request, int client){
 			printf("ENCODING...FOND...%s\n", request->accepted_encoding);
 			strcpy(response.content_encoding, server_accepted_encoding);
 
-			int input_size = strlen(request->body) + 1;
-			int compressed_size = input_size * 2;
-			char *compressed_data = (char *)malloc(compressed_size);
-			if (compressed_data == NULL) {
+			int inputSize = strlen(response.body) + 1;  // Include null terminator
+
+			// Allocate memory for the compressed data
+			int compressedSize = inputSize * 2;  // Assume compressed size won't exceed 2 times the input size
+			char *compressedData = (char *)malloc(compressedSize);
+			if (compressedData == NULL) {
 				fprintf(stderr, "Error allocating memory for compressed data.\n");
-				return 1;
+				return 0;
 			}
-			
-			int compressed_data_size = compressGZIP(request->body, input_size, compressed_data, compressed_size);
 
-			if (compressed_data_size < 0) {
+			// Compress the input string
+			int compressedDataSize = compressGZIP(response.body, inputSize, compressedData, compressedSize);
+			if (compressedDataSize < 0) {
 				fprintf(stderr, "Error compressing data.\n");
-				free(compressed_data);
-				return 1;
+				free(compressedData);
+				return 0;
 			}
 
-			char *hex_dest = (char *)malloc(compressed_data_size * 2 + 1);
+			// Print the compressed data as hexadecimal
+			printf("Compressed data (hexadecimal representation): ");
+			char* hex = (char*)malloc(compressedDataSize * 2 + 1);
+			if (hex == NULL) {
+				fprintf(stderr, "Error allocating memory for hexadecimal representation.\n");
+				return 0;
+			}
+
+			for (int i = 0; i < compressedDataSize; i++) {
+				sprintf(hex + i * 2, "%02x", (unsigned char)compressedData[i]);
+			}
+			hex[compressedDataSize * 2] = '\0';
+			printf("\nCompressed size: %d\n", compressedDataSize);
 			
-			if (hex_dest == NULL) {
-				fprintf(stderr, "GZIP: Error allocating memory for hexadecimal representation.\n");
-				return 1;
+			if (hex == NULL) {
+				printf("Hexadecimal representation: %s\n", hex);
+				free(hex);
+				return 0;
 			}
 
-			for (int i = 0; i < compressed_data_size; i++) {
-				sprintf(&hex_dest[i * 2], "%02x", (unsigned char)compressed_data[i]);
-			}
+			strcpy(response.body, hex);
 
-			printf("Gzip...SuCCESS...%s\n", compressed_data);
-			printf("Compressed data: ");
 
-			hex_dest[compressed_data_size * 2] = '\0';
-			printf("%s\n", hex_dest);
-			strcpy(response.body, hex_dest);
-			free(compressed_data);
+			free(compressedData);
 
 		}
 
@@ -650,5 +677,6 @@ int compressGZIP(const char *input, int inputSize, char *output, int outputSize)
   return zs.total_out;
 
 }
+
 
 
